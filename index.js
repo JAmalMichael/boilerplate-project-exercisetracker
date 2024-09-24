@@ -89,72 +89,114 @@ app.get("/api/users", async (req, res) => {
 
 // Add exercise to user
 app.post("/api/users/:_id/exercises", async (req, res) => {
-  const { description, duration, date } = req.body;
+  console.log("post exercises can be working");
+  const userId = req.params._id;
+  console.log("userparam id working");
 
-  try {
-    const user = await User.findById(req.params._id);
+  let { description, duration, date } = req.body;
 
-    if (!user) {
-      return res.status(400).json({ error: "User not found" });
-    }
+  // if(!date){
+  //   date = new Date()
+  // } else {
+  //   date = new Date(date)
+  // }
 
-    const exercise = new Exercise({
-      userId: user._id,
-      description,
-      duration: parseInt(duration),
-      date: date ? new Date(date) : new Date(),
-    });
+  //changing returns to date =  and removing const dateChecker fixed:
+  // The response returned from POST /api/users/:_id/exercises will be the user object with the exercise fields added.
+  if (!date) {
+    date = new Date(Date.now()).toDateString();
+  } else {
+    const parts = date.split("-");
+    const year = parseInt(parts[0]);
+    const month = parseInt(parts[1]) - 1;
+    const day = parseInt(parts[2]);
 
-    await exercise.save();
-
-    const exerciseCount = await Exercise.countDocuments({ userId: user._id });
-
-    res.json({
-      username: user.username,
-      count: exerciseCount,
-      _id: user._id,
-      description: exercise.description,
-      duration: exercise.duration,
-      date: exercise.date.toDateString(),
-    });
-  } catch (error) {
-    res.status(500).json({ error: "Server error, please try again" });
+    const utcDate = new Date(Date.UTC(year, month, day));
+    date = new Date(
+      utcDate.getTime() + utcDate.getTimezoneOffset() * 60000
+    ).toDateString();
   }
+
+  let foundUser = await User.findById(userId);
+
+  const newExercise = new Exercise({
+    username: foundUser.username,
+    description,
+    duration: Number(duration),
+    date,
+    userId: userId,
+  });
+
+  await newExercise.save();
+
+  res.json({
+    _id: foundUser._id,
+    username: foundUser.username,
+    description: newExercise.description,
+    duration: newExercise.duration,
+    date: newExercise.date.toDateString(),
+  });
 });
 
 app.get("/api/users/:_id/logs", async (req, res) => {
   const { from, to, limit } = req.query;
 
   try {
-    // Find the user by ID
     const user = await User.findById(req.params._id);
 
     if (!user) {
       return res.status(400).json({ error: "User not found" });
     }
 
-    // Construct query for exercises
     let query = { userId: user._id };
 
-    if (from) query.date = { ...query.date, $gte: new Date(from) };
-    if (to) query.date = { ...query.date, $lte: new Date(to) };
+    if (from || to) {
+      query.date = {};
+      if (from)
+        query.date.$gte = new Date(
+          Date.UTC(
+            from.split("-")[0],
+            from.split("-")[1] - 1,
+            from.split("-")[2]
+          )
+        );
+      if (to)
+        query.date.$lte = new Date(
+          Date.UTC(to.split("-")[0], to.split("-")[1] - 1, to.split("-")[2])
+        );
+    }
 
-    // Find exercises based on query and limit the results
-    const exercises = await Exercise.find(query).limit(parseInt(limit) || 100);
+    const checkDate = (date) => {
+      if (!date) {
+        return new Date(Date.now()).toDateString();
+      } else {
+        const parts = date.split("-");
+        const year = parseInt(parts[0]);
+        const month = parseInt(parts[1]) - 1;
+        const day = parseInt(parts[2]);
 
-    // Format the exercises into the log array
+        const utcDate = new Date(Date.UTC(year, month, day));
+        return new Date(
+          utcDate.getTime() + utcDate.getTimezoneOffset() * 60000
+        ).toDateString();
+      }
+    };
+    const exerciseDate = checkDate(date);
+
+    let exercises = await Exercise.find(query).limit(parseInt(limit) || 100);
+
     const log = exercises.map((ex) => ({
       description: ex.description,
       duration: ex.duration,
-      date: ex.date.toDateString(),
+      //date: checkDate(ex.date.toISOString().split('T')[0]), // Use .toDateString() for correct format
     }));
 
-    // Respond with the user's data and their exercise log
     res.json({
       username: user.username,
-      count: log.length,
+      count: exercises.length,
       _id: user._id,
       log,
+      date: exerciseDate,
     });
   } catch (error) {
     res.status(500).json({ error: "Server error, please try again" });
