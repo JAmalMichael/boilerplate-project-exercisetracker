@@ -23,6 +23,9 @@ const ExerciseSchema = new mongoose.Schema({
   userId: {
     type: String,
   },
+  count: {
+    type: Number,
+  },
   description: {
     type: String,
   },
@@ -57,9 +60,18 @@ app.post("/api/users", async (req, res) => {
   const { username } = req.body;
 
   try {
-    const user = new User({ username });
-    await user.save();
-    res.json({ username: user.username, _id: user._id });
+    const existingUser = await User.findOne({ username });
+
+    if (existingUser) {
+      res.json({
+        username: existingUser.username,
+        _id: existingUser._id,
+      });
+    } else {
+      const newUser = new User({ username });
+      await newUser.save();
+      res.json({ username: newUser.username, _id: newUser._id });
+    }
   } catch (error) {
     res.status(500).json({ error: "Server error, please try again" });
   }
@@ -89,18 +101,21 @@ app.post("/api/users/:_id/exercises", async (req, res) => {
     const exercise = new Exercise({
       userId: user._id,
       description,
-      duration,
+      duration: parseInt(duration),
       date: date ? new Date(date) : new Date(),
     });
 
     await exercise.save();
 
+    const exerciseCount = await Exercise.countDocuments({ userId: user._id });
+
     res.json({
       username: user.username,
+      count: exerciseCount,
+      _id: user._id,
       description: exercise.description,
       duration: exercise.duration,
-      date: exercise.date.toDateString(), // Fixed the typo here
-      _id: user._id,
+      date: exercise.date.toDateString(),
     });
   } catch (error) {
     res.status(500).json({ error: "Server error, please try again" });
@@ -111,32 +126,35 @@ app.get("/api/users/:_id/logs", async (req, res) => {
   const { from, to, limit } = req.query;
 
   try {
-    // Fetch the user by ID
+    // Find the user by ID
     const user = await User.findById(req.params._id);
 
-    // Check if user exists
     if (!user) {
       return res.status(400).json({ error: "User not found" });
     }
 
-    // Build query for exercises
+    // Construct query for exercises
     let query = { userId: user._id };
+
     if (from) query.date = { ...query.date, $gte: new Date(from) };
     if (to) query.date = { ...query.date, $lte: new Date(to) };
 
-    // Find exercises based on query and limit
+    // Find exercises based on query and limit the results
     const exercises = await Exercise.find(query).limit(parseInt(limit) || 100);
 
-    // Send the response
+    // Format the exercises into the log array
+    const log = exercises.map((ex) => ({
+      description: ex.description,
+      duration: ex.duration,
+      date: ex.date.toDateString(),
+    }));
+
+    // Respond with the user's data and their exercise log
     res.json({
       username: user.username,
-      count: exercises.length,
+      count: log.length,
       _id: user._id,
-      log: exercises.map((ex) => ({
-        description: ex.description,
-        duration: ex.duration,
-        date: ex.date.toDateString(),
-      })),
+      log,
     });
   } catch (error) {
     res.status(500).json({ error: "Server error, please try again" });
